@@ -1,6 +1,15 @@
 plugins {
-  id "io.ratpack.ratpack-groovy" version "1.4.5"
+    id "maven"
+    id "java"
+    id "application"
+    id "eclipse"
+    id "idea"
+    id 'com.github.johnrengelman.shadow' version '1.2.3'
 }
+
+apply plugin: "java"
+apply plugin: "maven"
+apply plugin: "com.github.johnrengelman.shadow"
 
 repositories {
   jcenter()
@@ -16,5 +25,15 @@ dependencies {
 }
 
 task stage {
-  dependsOn installDist
+  //dependsOn installDist
+  dependsOn shadowJar
+}
+shadowJar {
+  classifier = 'fat'
+  manifest {
+    attributes 'Main-Verticle': 'HttpProxyServer'
+  }
+  mergeServiceFiles {
+    include 'META-INF/services/io.vertx.core.spi.VerticleFactory'
+  }
 }

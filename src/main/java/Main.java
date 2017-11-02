@@ -1,7 +1,7 @@
-import io.vertx.core.Launcher;
+import io.vertx.core.Vertx;
 
 public class Main {
-  public static void main(String... args) throws Exception {
-    Launcher.main(new String[] { "run", com.dinhnn.httpbridge.HttpProxyServer.class.toString() });
+  public static void main(String... args){
+    Vertx.vertx().deployVerticle(new HttpProxyServer());    
   }
 }
