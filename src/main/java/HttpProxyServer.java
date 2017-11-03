@@ -16,6 +16,7 @@ import io.vertx.core.http.HttpClientRequest;
 import io.vertx.core.http.HttpMethod;
 import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.http.HttpServerResponse;
+import io.vertx.core.http.ServerWebSocket;
 
 public class HttpProxyServer extends AbstractVerticle {
 	private String verifyToken;
@@ -29,6 +30,7 @@ public class HttpProxyServer extends AbstractVerticle {
 		client = vertx.createHttpClient();
 		vertx.createHttpServer()
 			.requestHandler(this::handleRequest)
+			.websocketHandler(this::handleWebSocket)
 			.listen(config().getInteger("port",Integer.getInteger("http.port")),config().getString("host", System.getProperty("http.address","0.0.0.0")),l->{
 				if(l.succeeded()){
 					System.out.println("proxy server started");
@@ -44,6 +46,9 @@ public class HttpProxyServer extends AbstractVerticle {
 			Buffer strBuff = Buffer.buffer(s);
 			buff.appendShort((short)strBuff.length()).appendBuffer(strBuff);
 		}
+	}
+	private void handleWebSocket(ServerWebSocket ws){
+	  ws.textMessageHandler(ws::writeTextMessage);
 	}
 	private void handleRequest(HttpServerRequest req){
 	  String token = req.getHeader("http-proxy-token");
