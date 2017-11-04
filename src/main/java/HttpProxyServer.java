@@ -165,9 +165,9 @@ public class HttpProxyServer extends AbstractVerticle {
 	    clientResp.resume();
 	  });
 	  req.headers().forEach(entry->{
-	    if(!entry.getKey().startsWith("http-proxy-")){
-	      clientReq.putHeader(entry.getKey(),entry.getValue());
-	    }
+	    String headerName = entry.getKey();
+	    if("Host".equals(headerName) || headerName.startsWith("http-proxy-") || headerName.startsWith("X-"))return;
+	    clientReq.putHeader(headerName,entry.getValue());
 	  });
 	  req.handler(clientReq::write);
 	  req.endHandler(v->clientReq.end());
