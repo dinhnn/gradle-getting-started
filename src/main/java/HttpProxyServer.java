@@ -19,21 +19,30 @@ import io.vertx.core.http.HttpServerResponse;
 import io.vertx.core.http.ServerWebSocket;
 
 public class HttpProxyServer extends AbstractVerticle {
+  static class OfflineMessage{
+    Buffer body;
+    long expired;
+    public OfflineMessage(Buffer body,long expired){
+      this.body = body;
+      this.expired = expired;
+    }
+  }
 	private String verifyToken;
 	AtomicReference<HttpServerRequest> waitingRequest = new AtomicReference<HttpServerRequest>(null);
 	EventBus eb;
 	HttpClient client;
+	private long messageTimeout;
 	@Override
 	public void start(Future<Void> startFuture) throws Exception {
 		eb = vertx.eventBus();
 		verifyToken = config().getString("verifyToken","7608132681920151");
+		messageTimeout = config().getLong("timeout",300000L);
 		client = vertx.createHttpClient();
 		vertx.createHttpServer()
 			.requestHandler(this::handleRequest)
 			.websocketHandler(this::handleWebSocket)
 			.listen(config().getInteger("port",Integer.getInteger("http.port")),config().getString("host", System.getProperty("http.address","0.0.0.0")),l->{
 				if(l.succeeded()){
-					System.out.println("proxy server started");
 					startFuture.complete();
 				} else {
 					startFuture.fail(l.cause());
@@ -49,15 +58,28 @@ public class HttpProxyServer extends AbstractVerticle {
 	}
 	ServerWebSocket connectedChannel;
 	private void handleWebSocket(ServerWebSocket ws){
+	  if(!verifyToken.equals(ws.path().substring(1))){
+	    ws.reject(400);
+	    return;
+	  }
 	  connectedChannel = ws;
 	  ws.binaryMessageHandler(this::handleWebsocketHandler);
 	  ws.closeHandler(v->{
 	    if(ws==connectedChannel)connectedChannel = null;
 	  });
-	  ws.textMessageHandler(ws::writeTextMessage);
+	  long now = System.currentTimeMillis();
+	  while(!offline.isEmpty()){
+      OfflineMessage msg = offline.remove();
+      if(msg.expired>now){
+        ws.writeBinaryMessage(msg.body);
+      }
+    }
+	  
 	}
 	private void handleWebsocketHandler(Buffer buff){
-	  
+	  int ofs = buff.getShort(0);
+	  String respAddr = buff.getString(2,ofs);
+	  eb.send(respAddr, buff.getBuffer(ofs,buff.length()));
 	}
 	private void handleRequest(HttpServerRequest req){
 	  String token = req.getHeader("http-proxy-token");
@@ -75,10 +97,13 @@ public class HttpProxyServer extends AbstractVerticle {
   		    } else {
     		    Buffer buffer = Buffer.buffer();
     		    int limit = 10;
+    		    long now = System.currentTimeMillis();
     		    while(limit>0 && !offline.isEmpty()){
     		      limit--;
-    		      Buffer msg = offline.remove();
-    		      buffer.appendInt(msg.length()).appendBuffer(msg);
+    		      OfflineMessage msg = offline.remove();
+    		      if(msg.expired>now){
+    		        buffer.appendInt(msg.body.length()).appendBuffer(msg.body);
+    		      }
     		    }
     		    buffer.appendInt(0);
     		    req.response().end(buffer);
@@ -141,14 +166,18 @@ public class HttpProxyServer extends AbstractVerticle {
 	  		});
 	  		mc.completionHandler(ar->{
 	  			if(ar.succeeded()){
-	  				HttpServerRequest pollingRequest = waitingRequest.getAndSet(null);
-	  				if(pollingRequest!=null){
-	  					System.out.println("forward to client");
-	  					pollingRequest.response().end(Buffer.buffer(buff.length()+8).appendInt(buff.length()).appendBuffer(buff).appendInt(0));
-	  				} else {
-	  					System.out.println("add to queue");
-	  					offline.add(buff);
-	  				}
+	  			  if(connectedChannel!=null){
+	  			    connectedChannel.writeBinaryMessage(buff);
+	  			  } else {
+  	  				HttpServerRequest pollingRequest = waitingRequest.getAndSet(null);
+  	  				if(pollingRequest!=null){
+  	  					System.out.println("forward to client");
+  	  					pollingRequest.response().end(Buffer.buffer(buff.length()+8).appendInt(buff.length()).appendBuffer(buff).appendInt(0));
+  	  				} else {
+  	  					System.out.println("add to queue");
+  	  					offline.add(new OfflineMessage(buff,System.currentTimeMillis()+messageTimeout));
+  	  				}
+	  			  }
 	  			} else {
 	  				vertx.cancelTimer(timer);
 	  				req.response().setStatusCode(500).end(ar.cause().getMessage());
@@ -160,7 +189,7 @@ public class HttpProxyServer extends AbstractVerticle {
 	  	req.response().end();
 	  }
 	}
-	Queue<Buffer> offline = new LinkedBlockingQueue<>();
+	Queue<OfflineMessage> offline = new LinkedBlockingQueue<>();
 	private void outgoing(HttpServerRequest req,String host){
 	  req.pause();
 	  StringBuilder sb =new StringBuilder(host).append(req.path());

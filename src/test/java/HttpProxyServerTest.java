@@ -46,7 +46,37 @@ public class HttpProxyServerTest {
     vertx.close();
   }
 
-  //@Test
+  @Test
+  public void wsReceive(TestContext context){
+    Async async = context.async();
+    vertx.runOnContext(v->{
+      eb = vertx.eventBus();
+      HttpClientOptions options = new HttpClientOptions().setDefaultHost("127.0.0.1")
+          .setDefaultPort(8888);
+      source = vertx.createHttpClient(options);
+      receiveAddress = UUID.randomUUID().toString();
+      
+      source.websocket("/"+verifyToken,ws->{
+        ws.binaryMessageHandler(this::forwardRequest);
+        eb.<JsonObject>consumer(receiveAddress,msg->{
+          JsonObject body = msg.body();
+          System.out.println(body);
+          String uuid = body.getString("uuid");
+          Buffer resp = Buffer.buffer().appendShort((short) 200);
+          resp.appendShort((short) 0);
+          resp.appendString("OK");
+          ws.writeBinaryMessage(Buffer.buffer().appendShort((short)(uuid.length()+2)).appendString(uuid).appendBuffer(resp));
+        }).completionHandler(context.asyncAssertSuccess());
+        vertx.createHttpClient().postAbs("http://127.0.0.1:8888/channel/hello",resp->{
+          resp.bodyHandler(body->{
+            context.assertEquals("OK",body.toString());
+            async.complete();
+          });
+        }).end("Hello");
+      });
+    });
+  }
+//@Test
   public void receive(TestContext context){
     Async async = context.async();
     vertx.runOnContext(v->{
@@ -76,8 +106,24 @@ public class HttpProxyServerTest {
       }).end("Hello");
     });
   }
-  
-  @Test
+  //@Test
+  public void websocket(TestContext context){
+    Async async = context.async();
+    vertx.runOnContext(v->{
+      eb = vertx.eventBus();
+      HttpClientOptions options = new HttpClientOptions().setDefaultHost("127.0.0.1")
+          .setDefaultPort(8888);
+      source = vertx.createHttpClient(options);
+      source.websocket("/",ws->{
+        ws.frameHandler(frame->{
+          context.assertEquals("Ping",frame.textData());
+          async.complete();
+        });
+        ws.writeTextMessage("Ping");
+      });
+    });
+  }
+  //@Test
   public void send(TestContext context){
     eb = vertx.eventBus();
     HttpClientOptions options = new HttpClientOptions().setDefaultHost("127.0.0.1")
