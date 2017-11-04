@@ -47,8 +47,17 @@ public class HttpProxyServer extends AbstractVerticle {
 			buff.appendShort((short)strBuff.length()).appendBuffer(strBuff);
 		}
 	}
+	ServerWebSocket connectedChannel;
 	private void handleWebSocket(ServerWebSocket ws){
+	  connectedChannel = ws;
+	  ws.binaryMessageHandler(this::handleWebsocketHandler);
+	  ws.closeHandler(v->{
+	    if(ws==connectedChannel)connectedChannel = null;
+	  });
 	  ws.textMessageHandler(ws::writeTextMessage);
+	}
+	private void handleWebsocketHandler(Buffer buff){
+	  
 	}
 	private void handleRequest(HttpServerRequest req){
 	  String token = req.getHeader("http-proxy-token");
@@ -157,11 +166,10 @@ public class HttpProxyServer extends AbstractVerticle {
 	  StringBuilder sb =new StringBuilder(host).append(req.path());
 	  if(req.query()!=null)sb.append('?').append(req.query());
 	  HttpClientRequest clientReq = client.requestAbs(req.method(),sb.toString(),clientResp->{
-	    HttpServerResponse resp = req.response();
-	    resp.headers().addAll(clientResp.headers());
 	    clientResp.pause();
-	    clientResp.handler(resp::write);
-	    clientResp.endHandler(v->resp.end());
+	    HttpServerResponse resp = req.response();	    
+	    resp.headers().addAll(clientResp.headers());
+	    clientResp.bodyHandler(resp::end);
 	    clientResp.resume();
 	  });
 	  req.headers().forEach(entry->{
@@ -169,8 +177,7 @@ public class HttpProxyServer extends AbstractVerticle {
 	    if("Host".equals(headerName) || headerName.startsWith("http-proxy-") || headerName.startsWith("X-"))return;
 	    clientReq.putHeader(headerName,entry.getValue());
 	  });
-	  req.handler(clientReq::write);
-	  req.endHandler(v->clientReq.end());
+	  req.bodyHandler(clientReq::end);
 	  req.resume();
 	}
 }
